@@ -750,7 +750,9 @@ export class CoreWSProvider {
         const requestUrl = `${siteUrl}&wsfunction=${method}`;
 
         // Perform the post request.
-        const promise = firstValueFrom(Http.post(requestUrl, ajaxData, options).pipe(timeout(this.getRequestTimeout())));
+        const promise = firstValueFrom(
+            Http.post(requestUrl, ajaxData, options).pipe(timeout(preSets.timeout ?? this.getRequestTimeout())),
+        );
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return promise.then(async (data: any) => {
@@ -1486,6 +1488,11 @@ export type CoreWSPreSets = {
      * can cause the request to fail (see PHP's max_input_vars).
      */
     splitRequest?: CoreWSPreSetsSplitRequest;
+
+    /**
+     * Custom timeout in milliseconds for this call, overriding the default getRequestTimeout() value.
+     */
+    timeout?: number;
 };
 
 export type CoreWSTypeExpected = 'boolean'|'number'|'string'|'jsonstring'|'object';

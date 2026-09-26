@@ -14,6 +14,16 @@
 
 import { NgModule, Type, provideAppInitializer } from '@angular/core';
 import { CoreStyles } from './services/styles';
+import { CorePromiseUtils } from '@static/promise-utils';
+import { CoreLogger } from '@static/logger';
+
+/**
+ * Maximum time to wait for styles to be preloaded during app boot before giving up and letting the app continue.
+ * This initializer preloads the styles of every stored site (see CoreStylesService.initialize), which can
+ * involve fetching remote data; if any of those calls hangs (e.g. an unreachable custom CSS URL), it must not
+ * block the whole app from bootstrapping forever, since this runs as an APP_INITIALIZER.
+ */
+const STYLES_INITIALIZATION_TIMEOUT = 10000;
 
 /**
  * Get style services.
@@ -30,7 +40,16 @@ export async function getStyleServices(): Promise<Type<unknown>[]> {
 
 @NgModule({
     providers: [
-        provideAppInitializer(() =>  CoreStyles.initialize()),
+        provideAppInitializer(async () => {
+            try {
+                await CorePromiseUtils.timeoutPromise(CoreStyles.initialize(), STYLES_INITIALIZATION_TIMEOUT);
+            } catch (error) {
+                CoreLogger.getInstance('CoreStylesModule').error(
+                    'Styles took too long to initialize, continuing without waiting for them',
+                    error,
+                );
+            }
+        }),
     ],
 })
 export class CoreStylesModule {}

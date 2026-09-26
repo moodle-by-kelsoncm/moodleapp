@@ -320,6 +320,10 @@ export class CoreAuthenticatedSite extends CoreUnauthenticatedSite {
             getFromCache: false,
             saveToCache: false,
             skipQueue: true,
+            // This is typically the very first authenticated call for a site (e.g. right after an SSO/OAuth
+            // login), which can be slower than usual if the site needs to validate the session against an
+            // external identity provider. Give it more room than the default request timeout.
+            timeout: 45000,
         };
 
         // Reset clean Unicode to check if it's supported again.
@@ -451,6 +455,7 @@ export class CoreAuthenticatedSite extends CoreUnauthenticatedSite {
             typeExpected: preSets.typeExpected,
             responseExpected: preSets.responseExpected,
             splitRequest: preSets.splitRequest,
+            timeout: preSets.timeout,
         };
 
         if (wsPreSets.cleanUnicode && CoreText.hasUnicodeData(data)) {
@@ -1872,6 +1877,11 @@ export type CoreSiteWSPreSets = {
      * Ignored if filter=false or data is not saved to cache.
      */
     fetchOriginalToo?: boolean | ((response: unknown) => boolean | Promise<boolean>);
+
+    /**
+     * Custom timeout in milliseconds for this call, overriding the default request timeout.
+     */
+    timeout?: number;
 };
 
 /**

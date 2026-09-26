@@ -360,6 +360,27 @@ export class CoreSitesProvider {
     protected static readonly VALID_VERSION = 1;
     protected static readonly INVALID_VERSION = -1;
 
+    /**
+     * Maximum time to wait for a new site to be created. newSite() chains several sequential network requests
+     * (site info, config, login), and it's used to resolve SSO/OAuth deep links behind a blocking loading modal
+     * (see CoreCustomURLSchemesProvider.handleCustomURL). If the app is backgrounded mid-request (e.g. while the
+     * user authenticates in an external browser during OAuth login) the underlying request promise can be left
+     * orphaned when the app resumes, hanging forever with neither a response nor a timeout. This bounds the whole
+     * operation so the user always ends up with an error instead of a stuck loading screen.
+     */
+    protected static readonly NEW_SITE_TIMEOUT = 90000;
+
+    /**
+     * Number of attempts for newSite(). The app-resume scenario described in NEW_SITE_TIMEOUT above is
+     * consistently reproducible but not always transient: a request issued moments after a failed one usually
+     * succeeds, but the underlying call can also be consistently slow (e.g. a site validating a fresh SSO/OAuth
+     * session against an external identity provider). The failure itself can surface in different shapes
+     * depending on which underlying request got orphaned and which timeout (ours, or an inner WS call's own
+     * timeout) fires first, so newSite() retries on any failure of a whole attempt, not just our own
+     * timeoutPromise rejection.
+     */
+    protected static readonly NEW_SITE_MAX_ATTEMPTS = 2;
+
     protected logger = CoreLogger.getInstance('CoreSitesProvider');
     protected sessionRestored = false;
     protected currentSite?: CoreSite;
@@ -850,6 +871,48 @@ export class CoreSitesProvider {
      * @returns A promise resolved with siteId when the site is added and the user is authenticated.
      */
     async newSite(
+        siteUrl: string,
+        token: string,
+        privateToken = '',
+        login = true,
+        oauthId?: number,
+    ): Promise<string> {
+        let lastError;
+
+        for (let attempt = 1; attempt <= CoreSitesProvider.NEW_SITE_MAX_ATTEMPTS; attempt++) {
+            try {
+                return await CorePromiseUtils.timeoutPromise(
+                    this.performNewSite(siteUrl, token, privateToken, login, oauthId),
+                    CoreSitesProvider.NEW_SITE_TIMEOUT,
+                );
+            } catch (error) {
+                lastError = error;
+
+                // See NEW_SITE_MAX_ATTEMPTS: the app-resume scenario can fail in different ways (this outer
+                // timeout, or a WS call's own internal timeout/connection error further down the chain), so
+                // retry regardless of the error shape rather than only on our own timeoutPromise rejection.
+            }
+        }
+
+        if (lastError?.timeout) {
+            throw new CoreError(Translate.instant('core.serverconnection', { details: 'Request timed out' }));
+        }
+
+        throw lastError;
+    }
+
+    /**
+     * Perform the actual work of newSite(), see its documentation. Split out so the whole operation can be bounded
+     * by a timeout.
+     *
+     * @param siteUrl The site url.
+     * @param token User's token.
+     * @param privateToken User's private token.
+     * @param login Whether to login the user in the site. Defaults to true.
+     * @param oauthId OAuth ID. Only if the authentication was using an OAuth method.
+     * @returns A promise resolved with siteId when the site is added and the user is authenticated.
+     */
+    protected async performNewSite(
         siteUrl: string,
         token: string,
         privateToken = '',

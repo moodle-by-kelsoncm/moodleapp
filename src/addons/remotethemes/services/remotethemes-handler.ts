@@ -74,22 +74,34 @@ export class AddonRemoteThemesHandlerService implements CoreStyleHandler {
             return '';
         }
 
-        // Download the file and remove old CSS files if needed.
-        const fileUrl = await this.downloadFileAndRemoveOld(siteId, infos.mobilecssurl);
-
-        this.logger.debug('Loading styles from: ', fileUrl);
-
-        // Get the CSS content using HTTP because we will treat the styles before saving them in the file.
-        const style = await this.getRemoteStyles(fileUrl);
-
-        if (style != '') {
-            // Treat the CSS.
-            CorePromiseUtils.ignoreErrors(
-                CoreFilepool.treatCSSCode(siteId, infos.mobilecssurl, style, COMPONENT, 1),
+        try {
+            // Download the file and remove old CSS files if needed.
+            // This handler is used by an APP_INITIALIZER, so it must never hang: the native download call has no
+            // timeout of its own (see CoreWS.downloadFile), and an unreachable or unresponsive mobilecssurl would
+            // otherwise block the whole app from bootstrapping forever.
+            const fileUrl = await CorePromiseUtils.timeoutPromise(
+                this.downloadFileAndRemoveOld(siteId, infos.mobilecssurl),
+                CoreWS.getRequestTimeout(),
             );
-        }
 
-        return style;
+            this.logger.debug('Loading styles from: ', fileUrl);
+
+            // Get the CSS content using HTTP because we will treat the styles before saving them in the file.
+            const style = await CorePromiseUtils.timeoutPromise(this.getRemoteStyles(fileUrl), CoreWS.getRequestTimeout());
+
+            if (style != '') {
+                // Treat the CSS.
+                CorePromiseUtils.ignoreErrors(
+                    CoreFilepool.treatCSSCode(siteId, infos.mobilecssurl, style, COMPONENT, 1),
+                );
+            }
+
+            return style;
+        } catch (error) {
+            this.logger.error('Error loading remote styles, continuing without them', error);
+
+            return '';
+        }
     }
 
     /**
